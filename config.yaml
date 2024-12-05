@@ -1,0 +1,4 @@
+ignored_names:
+  - "linux-sockets-in-C"
+allowed_extensions:
+  - ".c"

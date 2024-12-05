@@ -1,0 +1,1787 @@
+Path: ./linux-thread-in-C/11_tiempos/011_thread.c
+Content:
+/*
+ * single-thread vs multi-thread
+ * utilizar "time" para comparar tiempos de ejecucion
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *work(void *arg);
+
+int main(int argc, char **argv)
+{
+    pthread_t thread1;
+    pthread_t thread2;
+    long valor1 = 1;
+    long valor2 = 2;
+
+    if (argc < 2)
+    {
+        printf("utilizar: single-thread <s> o multi-thread <m> o sequencial <j>\n");
+        return 0;
+    }
+    if (*argv[1] == 's')
+    {
+        // single-thread
+        work((void *)&valor1);
+        work((void *)&valor2);
+    }
+    else if (*argv[1] == 'm')
+    {
+        // multi-thread
+        pthread_create(&thread1, NULL, work, (void *)&valor1);
+        pthread_create(&thread2, NULL, work, (void *)&valor2);
+
+        pthread_join(thread1, NULL);
+        pthread_join(thread2, NULL);
+    }
+    else if (*argv[1] == 'j')
+    {
+        // multi-thread but sequential running
+        pthread_create(&thread1, NULL, work, (void *)&valor1);
+        pthread_join(thread1, NULL);
+
+        pthread_create(&thread2, NULL, work, (void *)&valor2);
+        pthread_join(thread2, NULL);
+    }
+
+    else
+    {
+        printf("las opciones son [s] o [m] o [j]\n");
+    }
+
+    return 0;
+}
+
+void *work(void *arg)
+{
+    // casting...
+    long *valor = (long *)(arg);
+
+    long suma, i;
+
+    for (i = 0; i < 1000000000; i++)
+    {
+        suma = suma + *valor;
+    }
+
+    printf("valor %ld\n", *valor);
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/16_PTHREAD_MUTEX_INITIALIZER/016_thread.c
+Content:
+/*
+ * PTHREAD_MUTEX_INITIALIZER (MACRO, initializes a static mutex with default attributes,  no error checking is performed)
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+
+#define HACER
+
+// declarar el mutex
+// pthread_mutex_t mutex;
+
+// declarar e inicializar
+pthread_mutex_t my_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// para simular un recurso compartido, primer version como variable global
+int shared_resource = 0;
+int read_shared_resource(void);
+void write_shared_resource(int value);
+
+// funcion que realiza un tarea sobre el recurso compartido
+void *work(void *);
+
+int main(int argc, char **argv)
+{
+    pthread_t t1, t2;
+    int before, after;
+    int valor1, valor2;
+
+    // initialize the mutex
+    // pthread_mutex_init(&mutex, NULL);
+
+    before = read_shared_resource();
+    printf("before: %d\n", before);
+
+    valor1 = 100;
+    valor2 = 200;
+    pthread_create(&t1, NULL, work, (void *)&valor1);
+    pthread_create(&t2, NULL, work, (void *)&valor2);
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    // destroy the mutex
+    // pthread_mutex_destroy(&mutex);
+
+    after = read_shared_resource();
+    printf("after: %d\n", after);
+
+    return 0;
+}
+
+void *work(void *arg)
+{
+    // simulamos una accion sobre el recurso compartido
+    int valor;
+
+    pthread_mutex_lock(&my_mutex);
+
+    // zona critica == start ==
+    // para proteger recursos del acceso concurrente
+    valor = read_shared_resource();
+    valor += *((int *)arg);
+    write_shared_resource(valor);
+    // zona critica == end ==
+
+    pthread_mutex_unlock(&my_mutex);
+
+    return NULL;
+}
+
+/*
+ * API's para interactual con el recurso compartido
+ */
+
+int read_shared_resource(void)
+{
+    usleep(250000);
+    return shared_resource;
+}
+
+void write_shared_resource(int value)
+{
+    usleep(250000);
+    shared_resource = value;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/13_race_condition/013_03_thread.c
+Content:
+/*
+ * race condition (salvada con mutex)
+ *
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+
+// para simular un recurso compartido, primer version como variable global
+int shared_resource = 0;
+int read_shared_resource(void);
+void write_shared_resource(int value);
+
+// funcion que realiza un tarea sobre el recurso compartido
+void *work(void *);
+
+// mutex variable
+pthread_mutex_t mutex;
+
+int main(int argc, char **argv)
+{
+    pthread_t t1, t2;
+    int before, after;
+    int valor1, valor2;
+
+    // initialize the mutex
+    pthread_mutex_init(&mutex, NULL);
+
+    before = read_shared_resource();
+    printf("before: %d\n", before);
+
+    // work(100);
+    // work(200);
+    valor1 = 100;
+    valor2 = 200;
+    pthread_create(&t1, NULL, work, (void *)&valor1);
+    pthread_create(&t2, NULL, work, (void *)&valor2);
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    // destroy the mutex
+    pthread_mutex_destroy(&mutex);
+
+    after = read_shared_resource();
+    printf("after: %d\n", after);
+
+    return 0;
+}
+
+void *work(void *arg)
+{
+    // simulamos una accion sobre el recurso compartido
+    int valor;
+
+    // el primer thread blockea el "recurso" y los demas se quedan esperando a que se libere
+    // el lock y el unlock del mutex definen los limetes de la zona critica (donde se podria
+    // producir race condition)
+    pthread_mutex_lock(&mutex);
+
+    // leer
+    valor = read_shared_resource();
+    // modificar
+    valor += *((int *)arg);
+    // escribir
+    write_shared_resource(valor);
+
+    // unlock, se liberar el mutex (salida de la zona critica) y ya otros threads pueden acceder
+    pthread_mutex_unlock(&mutex);
+
+    return NULL;
+}
+
+/*
+ * API's para interactual con el recurso compartido
+ */
+
+int read_shared_resource(void)
+{
+    usleep(250000);
+    return shared_resource;
+}
+
+void write_shared_resource(int value)
+{
+    usleep(250000);
+    shared_resource = value;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/13_race_condition/013_02_thread.c
+Content:
+/*
+ * race condition
+ *
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+
+// para simular un recurso compartido, primer version como variable global
+int shared_resource = 0;
+int read_shared_resource(void);
+void write_shared_resource(int value);
+
+// funcion que realiza un tarea sobre el recurso compartido
+void *work(void *);
+
+int main(int argc, char **argv)
+{
+    pthread_t t1, t2;
+    int before, after;
+    int valor1, valor2;
+
+    before = read_shared_resource();
+    printf("before: %d\n", before);
+
+    // work(100);
+    // work(200);
+    valor1 = 100;
+    valor2 = 200;
+    pthread_create(&t1, NULL, work, (void *)&valor1);
+    pthread_create(&t2, NULL, work, (void *)&valor2);
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    after = read_shared_resource();
+    printf("after: %d\n", after);
+
+    return 0;
+}
+
+void *work(void *arg)
+{
+
+    // simulamos una accion sobre el recurso compartido
+    int valor;
+
+    // leer
+    valor = read_shared_resource();
+    // modificar
+    valor += *((int *)arg);
+    // escribir
+    write_shared_resource(valor);
+}
+
+/*
+ * API's para interactual con el recurso compartido
+ */
+
+int read_shared_resource(void)
+{
+    usleep(250000);
+    return shared_resource;
+}
+
+void write_shared_resource(int value)
+{
+    usleep(250000);
+    shared_resource = value;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/13_race_condition/013_01_thread.c
+Content:
+/*
+ * race condition
+ *
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+
+// para simular un recurso compartido, primer version como variable global
+int shared_resource = 0;
+int read_shared_resource(void);
+void write_shared_resource(int value);
+
+// funcion que realiza un tarea sobre el recurso compartido
+void work(int);
+
+int main(int argc, char **argv)
+{
+    int before, after;
+
+    before = read_shared_resource();
+    printf("before: %d\n", before);
+
+    work(100);
+    work(200);
+
+    after = read_shared_resource();
+    printf("after: %d\n", after);
+
+    return 0;
+}
+
+void work(int arg)
+{
+
+    // simulamos una accion sobre el recurso compartido
+    int valor;
+
+    // leer
+    valor = read_shared_resource();
+    // modificar
+    valor += arg;
+    // escribir
+    write_shared_resource(valor);
+}
+
+/*
+ * API's para interactual con el recurso compartido
+ */
+
+int read_shared_resource(void)
+{
+    usleep(250000);
+    return shared_resource;
+}
+
+void write_shared_resource(int value)
+{
+    usleep(250000);
+    shared_resource = value;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/14_pasar_struct/014_thread.c
+Content:
+/*
+ * Get return multiple values from a thread (passed struct as reference as parameter)
+ *
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+
+struct data
+{
+    pthread_t thread_id;
+    long valor;
+    long resultado;
+    //....
+};
+
+typedef struct data DATA;
+
+void *work(void *arg);
+
+int main(int argc, char **argv)
+{
+
+    DATA st_data;
+
+    st_data.thread_id = 0;
+    st_data.valor = 10;
+    st_data.resultado = 0;
+
+    pthread_create(&st_data.thread_id, NULL, work, (void *)&st_data);
+
+    if (pthread_join(st_data.thread_id, NULL) != 0)
+    {
+        printf("Error join\n");
+    }
+
+    printf("res: %ld\n", st_data.resultado);
+
+    return 0;
+}
+
+void *work(void *arg)
+{
+
+    DATA *st = (DATA *)arg;
+
+    st->resultado = st->valor + 1;
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/05_hello_world/005_02_thread.c
+Content:
+// gcc -Wall <file> -o t -lpthread
+
+/*
+ * creacion de un thread
+ * esperar a que termine con join (bloquea main hasta que termine)
+ * si el caso de uso es garantizar que el thread termine, pero no necesito esperarlo
+ * puedo hacer lo siguiente: un detach y en main un pthread_exit (lo vemos en otro video)
+ * 
+ */
+
+#include <stdio.h>
+#include <unistd.h>
+
+// (1)
+#include <pthread.h>
+
+// (2) compilar con -lpthread
+
+// (3) crear la funcion que se ejecutara al crear el thread
+void *work();
+
+int main(int argc, char **argv)
+{
+
+    pthread_t thread1;
+
+    // (4) crear el thread
+    pthread_create(&thread1, NULL, work, NULL);
+
+    // (5) esperar a que termine el thread1
+    pthread_join(thread1, NULL);
+
+    return 0;
+}
+
+void *work()
+{
+    printf("== Informatica I ==\n");
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/05_hello_world/005_01_thread.c
+Content:
+#include <stdio.h>
+#include <unistd.h>
+
+void work();
+
+int main(int argc, char **argv)
+{
+
+    work();
+
+    return 0;
+}
+
+void work()
+{
+    printf("== Informatica I ==\n");
+}
+
+================================================================================
+Path: ./linux-thread-in-C/17_detach/017_03_thread.c
+Content:
+/*
+ * detached(separado) threads
+ *  un thread separado libera automáticamente los recursos asignados al salir (no ocurre lo mismo con joined)
+ *  como el thread separado libera automáticamente los recursos al salir, no hay forma de determinar
+ *  su valor de retorno de la función del thread separado
+ *
+ *  caso de uso:
+ *      a)  tareas en background
+ *      b)  se utiliza cuando desde el main tengo que lanzar muchos threads
+ *          y no tiene sentido gastar mucho tiempo con los join
+ *          directamente utilizo pthread_exit para que todos los threads puedan finalizar
+ *
+ */
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+
+#define THREAD_NUM 2
+
+void *work(void *args)
+{
+    sleep(1);
+    printf("End\n");
+}
+
+int main(int argc, char *argv[])
+{
+    int i;
+    pthread_t th[THREAD_NUM];
+
+    // otra forma de detach, con attr, pero ya lo creo detached
+    pthread_attr_t detachedThread;
+    pthread_attr_init(&detachedThread);
+    pthread_attr_setdetachstate(&detachedThread, PTHREAD_CREATE_DETACHED);
+
+    for (i = 0; i < THREAD_NUM; i++)
+    {
+        pthread_create(&th[i], &detachedThread, work, NULL);
+    }
+
+    // for (i = 0; i < THREAD_NUM; i++)
+    // {
+    //     if (pthread_join(th[i], NULL) != 0)
+    //     {
+    //         printf("Failed to join thread\n");
+    //     }
+    // }
+    // return 0;
+    pthread_attr_destroy(&detachedThread);
+    pthread_exit(0);
+}
+================================================================================
+Path: ./linux-thread-in-C/17_detach/017_02_thread.c
+Content:
+/*
+ * detached (threads)
+ *  verificar que si uun thread esta detached, se liberarn los recursos
+ *
+ */
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+
+#define THREAD_NUM 1
+
+int *ptr = NULL;
+
+void *work(void *args)
+{
+    sleep(1);
+    ptr = malloc(sizeof(int));
+    *ptr = 12345;
+    printf("End thread\n");
+}
+
+int main(int argc, char *argv[])
+{
+    int i;
+    pthread_t th[THREAD_NUM];
+
+    // por default los threads son joinable
+    // pero si a un thread lo detachamos, lo que estamos haciendo es que no permita join
+    // al querer hacer un join nos da error
+    // y en este caso no veremos los printf de los threads ya que al terminar main
+    // terminan lso threads (no tienen join)
+    for (i = 0; i < THREAD_NUM; i++)
+    {
+        pthread_create(&th[i], NULL, work, NULL);
+        // pthread_detach(th[i]);
+    }
+    for (i = 0; i < THREAD_NUM; i++)
+    {
+        if (pthread_join(th[i], NULL) != 0)
+        {
+            printf("Failed to join thread\n");
+        }
+    }
+
+    printf("El valor int es %d\n", *ptr);
+    free(ptr);
+
+    // return 0;
+
+    // puedo esperarlos (pero no con join!)
+    pthread_exit(0);
+}
+================================================================================
+Path: ./linux-thread-in-C/17_detach/017_01_thread.c
+Content:
+/*
+ * detached (threads)
+ *
+ */
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+
+#define THREAD_NUM 3
+
+void *work(void *args)
+{
+    sleep(1);
+    printf("End thread\n");
+}
+
+int main(int argc, char *argv[])
+{
+    int i;
+    pthread_t th[THREAD_NUM];
+
+    // por default los threads son joinable
+    // pero si a un thread lo detachamos, lo que estamos haciendo es que no permita join
+    // al querer hacer un join nos da error
+    // y en este caso no veremos los printf de los threads ya que al terminar main
+    // terminan lso threads (no tienen join)
+    for (i = 0; i < THREAD_NUM; i++)
+    {
+        pthread_create(&th[i], NULL, work, NULL);
+        pthread_detach(th[i]);
+    }
+    for (i = 0; i < THREAD_NUM; i++)
+    {
+        if (pthread_join(th[i], NULL) != 0)
+        {
+            printf("Failed to join thread\n");
+        }
+    }
+
+    while (1)
+    {
+        // doing....
+        //
+    }
+
+    return 0;
+
+    // puedo esperarlos (pero no con join!)
+    // pthread_exit(0);
+}
+================================================================================
+Path: ./linux-thread-in-C/15_pthread_t/015_thread.c
+Content:
+/*
+ * pthread_t vs gettid (linux specific, kernel mode)
+ *
+ *
+ */
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+#include <sys/syscall.h>
+
+#define THREAD_NUM 2
+
+void *work(void *args);
+
+int main(int argc, char *argv[])
+{
+    pthread_t arr_t[THREAD_NUM];
+    int i;
+
+    printf("main:: main pid: %d\n", getpid());
+    printf("main:: main tid: %lu\n", pthread_self());
+    printf("main:: main tid(kernel): %d\n", (pid_t)syscall(SYS_gettid)); // linux specific!
+
+    for (i = 0; i < THREAD_NUM; i++)
+    {
+        pthread_create(&arr_t[i], NULL, work, NULL);
+        printf("main:: work tid: %lu\n", arr_t[i]);
+    }
+
+    for (i = 0; i < THREAD_NUM; i++)
+    {
+        pthread_join(arr_t[i], NULL);
+    }
+
+    return 0;
+}
+
+void *work(void *args)
+{
+    printf("\twork:: main pid: %d\n", getpid());
+    printf("\twork:: work tid: %lu\n", pthread_self());
+    printf("\twork:: work tid: %d\n", (pid_t)syscall(SYS_gettid)); // linux specific!
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/06_crear_dos_threads/006_01_thread.c
+Content:
+// gcc -Wall <file> -o t -lpthread
+
+/*
+ * creacion y join de dos thread
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *work();
+
+int main(int argc, char **argv)
+{
+
+    pthread_t thread1, thread2;
+
+    pthread_create(&thread1, NULL, work, NULL);
+    // (1) crear el segundo thread
+    pthread_create(&thread2, NULL, work, NULL);
+
+    pthread_join(thread1, NULL);
+    // (2) esperar a que termine el thread2
+    pthread_join(thread2, NULL);
+
+    return 0;
+}
+
+void *work()
+{
+    printf("== Informatica I ==\n");
+    // (3) para simular el "paralelismo"
+    sleep(3);
+    printf("== Fin ==\n");
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/06_crear_dos_threads/006_02_thread.c
+Content:
+// gcc -Wall <file> -o t -lpthread
+
+/*
+ * creacion y join de dos thread (cada thread con funcion diferente)
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *work1();
+void *work2();
+
+int main(int argc, char **argv)
+{
+
+    pthread_t thread1, thread2;
+
+    pthread_create(&thread1, NULL, work1, NULL);
+    // (1) crear el segundo thread
+    pthread_create(&thread2, NULL, work2, NULL);
+
+    pthread_join(thread1, NULL);
+    // (2) esperar a que termine el thread2
+    pthread_join(thread2, NULL);
+
+    return 0;
+}
+
+void *work1()
+{
+    printf("== Informatica I work1 ==\n");
+    // (3) para simular el "paralelismo"
+    sleep(3);
+    printf("== Fin work1 ==\n");
+
+    return NULL;
+}
+
+void *work2()
+{
+    printf("== Informatica I work2 ==\n");
+    // (3) para simular el "paralelismo"
+    sleep(3);
+    printf("== Fin work2 ==\n");
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/18_deadlock/018_01_thread.c
+Content:
+/*
+ * deadlock (simple)
+ *
+ */
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+
+// recurso compartido
+int counter = 50;
+// mutex para el recurso compartido
+pthread_mutex_t mutex_counter;
+
+void *work(void *args);
+
+int main(int argc, char *argv[])
+{
+    int i;
+    pthread_t t1, t2;
+
+    // sin prevenir el deadlock
+    pthread_mutex_init(&mutex_counter, NULL);
+
+    // para prevenir el deadlock
+    // pthread_mutexattr_t attr;
+    // pthread_mutexattr_init(&attr);
+    // pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
+    // pthread_mutex_init(&mutex_counter, &attr);
+
+    pthread_create(&t1, NULL, work, NULL);
+    pthread_create(&t2, NULL, work, NULL);
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    pthread_mutex_destroy(&mutex_counter);
+
+    printf("counter: %d\n", counter);
+
+    return 0;
+}
+
+void *work(void *args)
+{
+    pthread_mutex_lock(&mutex_counter);
+    // deadlock!
+    pthread_mutex_lock(&mutex_counter);
+    counter += 10;
+    pthread_mutex_unlock(&mutex_counter);
+}
+================================================================================
+Path: ./linux-thread-in-C/18_deadlock/018_02_thread.c
+Content:
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <time.h>
+
+struct account
+{
+    int id;
+    int balance;
+    pthread_mutex_t mutex_balance;
+};
+typedef struct account ACCOUNT;
+
+struct transaction
+{
+    ACCOUNT *from;
+    ACCOUNT *to;
+    int value;
+};
+typedef struct transaction TRANSACTION;
+
+void *transfer(void *);
+
+int main(int argc, char *argv[])
+{
+
+    pthread_t t1, t2;
+    ACCOUNT a, b;
+    TRANSACTION from_a_to_b, from_b_to_a;
+
+    a.id = 1;
+    a.balance = 100;
+    pthread_mutex_init(&a.mutex_balance, NULL);
+
+    b.id = 2;
+    b.balance = 500;
+    pthread_mutex_init(&b.mutex_balance, NULL);
+
+    from_a_to_b.from = &a;
+    from_a_to_b.to = &b;
+    from_a_to_b.value = 5;
+
+    from_b_to_a.from = &b;
+    from_b_to_a.to = &a;
+    from_b_to_a.value = 10;
+
+    pthread_create(&t1, NULL, transfer, &from_a_to_b);
+    pthread_create(&t2, NULL, transfer, &from_b_to_a);
+    pthread_join(t1, NULL);
+    pthread_join(t2, NULL);
+
+    pthread_mutex_destroy(&a.mutex_balance);
+    pthread_mutex_destroy(&a.mutex_balance);
+
+    printf("== balance 'a' %d == \n", a.balance); // a = 100 -5 + 10 = 105
+    printf("== balance 'b' %d == \n", b.balance); // b = 500 +5 - 10 = 495
+
+    return 0;
+}
+
+void *transfer(void *args)
+{
+
+    TRANSACTION *t = (TRANSACTION *)args;
+
+    if (t->from->id < t->to->id)
+    {
+        pthread_mutex_lock(&(t->from->mutex_balance));
+        usleep(25000);
+        pthread_mutex_lock(&(t->to->mutex_balance));
+    }
+    else
+    {
+        pthread_mutex_lock(&(t->to->mutex_balance));
+        usleep(25000);
+        pthread_mutex_lock(&(t->from->mutex_balance));
+    }
+
+    // tranferencia
+    t->from->balance = t->from->balance - t->value; // falta verificar que tenga saldo por ejemplo
+    t->to->balance = t->to->balance + t->value;
+
+    pthread_mutex_unlock(&(t->to->mutex_balance));
+    pthread_mutex_unlock(&(t->from->mutex_balance));
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/20_prod_cons/parte_2/buffer.c
+Content:
+#include "buffer.h"
+
+int buffer_init(buffer_t * buffer, int capacity){
+    // create dynamic array
+    buffer->array = malloc(capacity*sizeof(slot_t));
+    
+    // TODO...check malloc
+    // ...
+
+    buffer->capacity = capacity;
+    buffer->size = 0;
+    buffer->head = 0;
+    buffer->tail = 0;
+
+    return EXIT_SUCCESS;
+
+}
+
+int buffer_insert(buffer_t* buffer, slot_t *slot){
+    if ( buffer->size < buffer->capacity){
+        buffer->array[buffer->head] = *slot;
+        buffer->head = (buffer->head +1 )%buffer->capacity;
+        buffer->size++;
+        return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+}
+
+int buffer_remove(buffer_t* buffer, slot_t * slot){
+    if (buffer->size >0){
+        *slot = buffer->array[buffer->tail];
+        buffer->tail = (buffer->tail +1 )%buffer->capacity;
+        buffer->size--;
+        return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+}
+
+void buffer_destroy(buffer_t * buffer){
+    free(buffer->array);
+
+}
+
+void buffer_dump(buffer_t* buffer){
+    int i,j;
+    
+    fprintf(stderr, "\n---- bounded buffer ---\n");
+    fprintf(stderr, "size: %d\n", buffer->size);
+    fprintf(stderr, "head: %d\n", buffer->head);
+    fprintf(stderr, "tail: %d\n", buffer->tail);
+    fprintf(stderr, "\n");
+
+    j = buffer->tail;
+    for(i=0; i< buffer->size; i++){
+        fprintf(stderr, "buffer[%d]: (%d)\n", j, buffer->array[j].value);
+        j = (j+1)%buffer->capacity;
+    }
+    fprintf(stderr, "--------------------------\n");
+
+}
+================================================================================
+Path: ./linux-thread-in-C/20_prod_cons/parte_2/test_buffer.c
+Content:
+// gcc  -Wall -o test_buffer test_buffer.c buffer.c
+
+#include "buffer.h"
+
+int main(){
+
+    buffer_t buffer;
+    slot_t slot = {10};
+
+    buffer_init(&buffer, 10);
+
+    buffer_insert(&buffer, &slot );
+    slot.value += 10;
+    buffer_insert(&buffer, &slot );
+    buffer_dump(&buffer);
+    buffer_remove(&buffer, &slot);
+    buffer_dump(&buffer);
+
+    buffer_destroy(&buffer);
+
+    return 0;
+}
+
+
+================================================================================
+Path: ./linux-thread-in-C/20_prod_cons/parte_3/buffer.c
+Content:
+#include "buffer.h"
+
+int buffer_init(buffer_t * buffer, int capacity){
+    // create dynamic array
+    buffer->array = malloc(capacity*sizeof(slot_t));
+    
+    // TODO...check malloc
+    // ...
+
+    buffer->capacity = capacity;
+    buffer->size = 0;
+    buffer->head = 0;
+    buffer->tail = 0;
+
+    return EXIT_SUCCESS;
+
+}
+
+int buffer_insert(buffer_t* buffer, slot_t *slot){
+    if ( buffer->size < buffer->capacity){
+        buffer->array[buffer->head] = *slot;
+        buffer->head = (buffer->head +1 )%buffer->capacity;
+        buffer->size++;
+        return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+}
+
+int buffer_remove(buffer_t* buffer, slot_t * slot){
+    if (buffer->size >0){
+        *slot = buffer->array[buffer->tail];
+        buffer->tail = (buffer->tail +1 )%buffer->capacity;
+        buffer->size--;
+        return EXIT_SUCCESS;
+    }
+    return EXIT_FAILURE;
+}
+
+void buffer_destroy(buffer_t * buffer){
+    free(buffer->array);
+
+}
+
+void buffer_dump(buffer_t* buffer){
+    int i,j;
+    
+    fprintf(stderr, "\n---- bounded buffer ---\n");
+    fprintf(stderr, "size: %d\n", buffer->size);
+    fprintf(stderr, "head: %d\n", buffer->head);
+    fprintf(stderr, "tail: %d\n", buffer->tail);
+    fprintf(stderr, "\n");
+
+    j = buffer->tail;
+    for(i=0; i< buffer->size; i++){
+        fprintf(stderr, "buffer[%d]: (%d)\n", j, buffer->array[j].value);
+        j = (j+1)%buffer->capacity;
+    }
+    fprintf(stderr, "--------------------------\n");
+
+}
+================================================================================
+Path: ./linux-thread-in-C/20_prod_cons/parte_3/test_buffer_prod_cons.c
+Content:
+// gcc  -Wall -o test_prod_cons test_buffer_prod_cons.c buffer.c -lpthread
+
+#include "buffer.h"
+#include <pthread.h>
+#include <unistd.h>
+
+
+#define PRODUCER    10
+#define CONSUMER    10
+
+void random_ms_sleep(int min, int max);
+
+buffer_t buffer;
+pthread_mutex_t mutex;
+
+
+void * producer(void*);
+void * consumer(void*);
+
+int main(){
+    pthread_t tp[PRODUCER];
+    pthread_t tc[CONSUMER];
+    int i;
+
+    buffer_init(&buffer, 10);
+    pthread_mutex_init(&mutex, NULL);
+
+    for(i=0;i<PRODUCER;i++){
+        pthread_create(&tp[i], NULL, producer, NULL);
+        pthread_detach(tp[i]);
+    }
+    for(i=0;i<CONSUMER;i++){
+        pthread_create(&tc[i], NULL, consumer, NULL);
+        pthread_detach(tc[i]);
+    }
+
+    while(1){
+        sleep(3);
+        buffer_dump(&buffer);
+    }
+
+    buffer_destroy(&buffer);
+    pthread_mutex_destroy(&mutex);
+
+    return 0;
+}
+
+void random_ms_sleep(int min, int max)
+{
+    usleep(1000 * (rand() % (max + 1 - min) + min));
+}
+
+
+void * producer(void* args){
+    slot_t slot;
+    int result;
+
+    while(1){
+        random_ms_sleep(100,500);
+        slot.value = rand()%100;
+        pthread_mutex_lock(&mutex);
+        result = buffer_insert(&buffer, &slot);
+        if (result != 0){
+            fprintf(stderr, "producer:: skipped and spent cpu!\n");
+        }
+        pthread_mutex_unlock(&mutex);
+    }
+    return NULL;
+}
+
+void * consumer(void* args){
+    slot_t slot;
+    int result;
+
+    while(1){
+        random_ms_sleep(100,500);
+        pthread_mutex_lock(&mutex);
+        result = buffer_remove(&buffer, &slot);
+        if (result != 0){
+            fprintf(stderr, "consumer:: spent cpu!\n");
+        }
+
+        pthread_mutex_unlock(&mutex);
+    }
+
+    return NULL;
+}
+
+
+================================================================================
+Path: ./linux-thread-in-C/08_task_switch/008_thread.c
+Content:
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *work();
+
+int main(int argc, char **argv)
+{
+
+    pthread_t thread1, thread2;
+
+    if (pthread_create(&thread1, NULL, work, NULL) != 0)
+        return 1;
+
+    if (pthread_create(&thread2, NULL, work, NULL) != 0)
+        return 2;
+
+    if (pthread_join(thread1, NULL) != 0)
+        return 3;
+
+    if (pthread_join(thread2, NULL) != 0)
+        return 4;
+
+    return 0;
+}
+
+void *work()
+{
+    // (3) para simular el "paralelismo"
+    int i;
+    int resto;
+    char c = 'X';
+
+    // solo para que en funcion al ultimo digito del thread id, imprima una 'X' o un 'o'
+    i = (int)pthread_self();
+    resto = i % 10;
+    if (resto > 5)
+    {
+        c = 'o';
+    }
+
+    // con esto puedo visualizar en pantalla el switch task de threads...
+    // ejecutar varias veces porque quizas coincide que los dos threas imprimen el mismo caracter
+    for (i = 0; i < 100; ++i)
+    {
+        fprintf(stderr, "%c", c);
+    }
+
+    pthread_exit(NULL);
+}
+
+================================================================================
+Path: ./linux-thread-in-C/19_signal/019_04_signal.c
+Content:
+/*
+ * envio de señales entre threads pthread_kill()
+ * solo puede hacerse dentro del mismo proceso
+ */
+
+#include <stdio.h>
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h> // sleep
+#include <string.h> //memset
+
+void signal_handler(int signo, siginfo_t *info, void *extra);
+void set_signal_handler(void);
+void set_signal_mask(void);
+
+void *work(void *p);
+
+int main()
+{
+    pthread_t t1, t2, t3;
+    int v1, v2, v3;
+
+    v1 = 1;
+    v2 = 2;
+    v3 = 3;
+
+    set_signal_handler();
+
+    pthread_create(&t1, NULL, work, &v1);
+    pthread_create(&t2, NULL, work, &v2);
+    pthread_create(&t3, NULL, work, &v3);
+
+    sleep(3);
+
+    // envio de señales
+    pthread_kill(t3, SIGRTMIN);
+    // sleep(10);
+    pthread_kill(t1, SIGRTMIN);
+    // sleep(10);
+    pthread_kill(t2, SIGRTMIN);
+
+    pthread_exit(NULL);
+}
+
+void *work(void *p)
+{
+    int *id = (int *)p;
+
+    while (1)
+    {
+        printf("work %d tid=%lu\n", *id, pthread_self());
+        sleep(1);
+    }
+    return 0;
+}
+
+void signal_handler(int signo, siginfo_t *info, void *extra)
+{
+    printf("\tsignal tid=%lu\n", pthread_self());
+}
+
+void set_signal_handler(void)
+{
+    struct sigaction action;
+
+    // memset(&action, 0, sizeof(action));
+    // action.sa_handler = &signal_handler;
+
+    action.sa_flags = SA_SIGINFO;
+    action.sa_sigaction = signal_handler;
+
+    sigaction(SIGRTMIN, &action, NULL);
+}
+
+================================================================================
+Path: ./linux-thread-in-C/19_signal/019_03_signal.c
+Content:
+/*
+ * En un prograna multithreaded, el handler de la señal, se ejecuta en uno de los threads
+ * No se puede predecir cual thread es el elegido.
+ * En señales que son excepciones, el handler lo ejecuta el thread que la genero
+ * kill -34 <pid>
+ *
+ * Lo que se puede hacer de una manera indirecta para elegir el thread para el handler
+ * es enmascaralo
+ */
+
+#include <stdio.h>
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h> // sleep
+#include <string.h> //memset
+
+void signal_handler(int signal_number);
+void set_signal_handler(void);
+void set_signal_mask(void);
+
+void *work(void *p);
+
+int main()
+{
+    pthread_t t1, t2, t3;
+    int v1, v2, v3;
+
+    v1 = 1;
+    v2 = 2;
+    v3 = 3;
+
+    set_signal_handler();
+    printf("pid = %d\n", getpid());
+
+    pthread_create(&t1, NULL, work, &(v1));
+    pthread_create(&t2, NULL, work, &(v2));
+    pthread_create(&t3, NULL, work, &(v3));
+
+    pthread_exit(NULL);
+}
+
+void *work(void *p)
+{
+    int *id = (int *)p;
+
+    // bloqueo la señal para los id = 1,2
+    // para que solo el thread con el id = 3 trate la señal
+    if (*id != 3)
+        set_signal_mask();
+
+    while (1)
+    {
+        printf("work %d tid=%lu\n", *id, pthread_self());
+        sleep(1);
+    }
+    return 0;
+}
+
+void signal_handler(int signal_number)
+{
+    int i;
+    for (i = 0; i < 3; i++)
+    {
+        printf("\tsignal tid=%lu\n", pthread_self());
+        sleep(1);
+    }
+}
+
+void set_signal_handler(void)
+{
+    struct sigaction action;
+
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = &signal_handler;
+    sigaction(SIGRTMIN, &action, NULL);
+}
+
+void set_signal_mask(void)
+{
+    sigset_t mask;
+
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGRTMIN);
+    pthread_sigmask(SIG_BLOCK, &mask, NULL);
+}
+================================================================================
+Path: ./linux-thread-in-C/19_signal/019_02_signal.c
+Content:
+/*
+ * En un prograna multithreaded, el handler de la señal, se ejecuta en uno de los threads
+ * No se puede predecir cual thread es el elegido.
+ * En señales que son excepciones, el handler lo ejecuta el thread que la genero
+ * kill -34 <pid>
+ *
+ */
+
+#include <stdio.h>
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h> // sleep
+#include <string.h> //memset
+
+void signal_handler(int signal_number);
+void set_signal_handler(void);
+
+void *work(void *p);
+
+int main()
+{
+    pthread_t t1, t2, t3;
+    int v1, v2, v3;
+
+    v1 = 1;
+    v2 = 2;
+    v3 = 3;
+
+    set_signal_handler();
+    printf("pid = %d\n", getpid());
+
+    pthread_create(&t1, NULL, work, &(v1));
+    pthread_create(&t2, NULL, work, &(v2));
+    pthread_create(&t3, NULL, work, &(v3));
+
+    pthread_exit(NULL);
+}
+
+void *work(void *p)
+{
+    int *id = (int *)p;
+    while (1)
+    {
+        printf("work %d tid=%lu\n", *id, pthread_self());
+        sleep(1);
+    }
+    return 0;
+}
+
+void signal_handler(int signal_number)
+{
+    int i;
+    for (i = 0; i < 3; i++)
+    {
+        printf("\tsignal tid=%lu\n", pthread_self());
+        sleep(1);
+    }
+}
+
+void set_signal_handler(void)
+{
+    struct sigaction action;
+
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = &signal_handler;
+    sigaction(SIGRTMIN, &action, NULL);
+}
+
+================================================================================
+Path: ./linux-thread-in-C/19_signal/019_01_signal.c
+Content:
+/*
+ * kill -l
+ * kill -34 <pid>
+ *
+ */
+
+#include <stdio.h>
+#include <pthread.h>
+#include <signal.h>
+#include <unistd.h> // sleep
+#include <string.h> //memset
+
+void signal_handler(int signal_number);
+void set_signal_handler(void);
+
+int main()
+{
+    set_signal_handler();
+    printf("pid = %d\n", getpid());
+    while (1)
+    {
+        pause();
+    }
+}
+
+void signal_handler(int signal_number)
+{
+    int i;
+    for (i = 0; i < 3; i++)
+    {
+        printf("\tsignal(%d)\n", i);
+        sleep(1);
+    }
+}
+
+void set_signal_handler(void)
+{
+    struct sigaction action;
+
+    memset(&action, 0, sizeof(action));
+    action.sa_handler = &signal_handler;
+    sigaction(SIGRTMIN, &action, NULL);
+}
+
+================================================================================
+Path: ./linux-thread-in-C/09_pthread_exit_main/009_thread.c
+Content:
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *work();
+
+int main(int argc, char **argv)
+{
+
+    pthread_t thread1, thread2;
+
+    if (pthread_create(&thread1, NULL, work, NULL) != 0)
+        return 1;
+
+    if (pthread_create(&thread2, NULL, work, NULL) != 0)
+        return 2;
+
+    // if (pthread_join(thread1, NULL) != 0)
+    //     return 3;
+
+    // if (pthread_join(thread2, NULL) != 0)
+    //     return 4;
+
+    printf("==End main()==");
+
+    // si no forzamos la escritura, quizas podemos observar que siempre se escribe al finalizar los threads
+    // y no podriamos ver el funcionamiento correcto
+    fflush(stdout);
+
+    // al no hacer los join, si utilizamos return 0, finaliza main y todos los threads
+    // en cambio si finalizamos main con pthread_exit, los threads que se estan ejecutando continuan
+    // a pesar de que main finalice.
+    // esto quiere decir que el proceso sigue vivo (no asi el thread main)
+    // ejecutar el comando ps en otra consola para ver el estado del proceso
+    pthread_exit(NULL);
+
+    // return 0;
+}
+
+void *work()
+{
+    // (3) para simular el "paralelismo"
+    int i;
+    int j;
+    int resto;
+    char c = 'X';
+
+    // solo para que en funcion al ultimo digito del thread id, imprima una 'X' o un 'o'
+    i = (int)pthread_self();
+    resto = i % 10;
+    if (resto > 5)
+    {
+        c = 'o';
+    }
+
+    // con esto puedo visualizar en pantalla el switch task de threads...
+    // ejecutar varias veces porque quizas coincide que los dos threas imprimen el mismo caracter
+    for (i = 0; i < 100; ++i)
+    {
+        fprintf(stderr, "%c", c);
+        usleep(10000);
+    }
+
+    pthread_exit(NULL);
+}
+
+================================================================================
+Path: ./linux-thread-in-C/07_control_de_errores/007_thread.c
+Content:
+/*
+ * control de errores a la hora de crear o hacer join de threads
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *work();
+
+int main(int argc, char **argv)
+{
+
+    pthread_t thread1, thread2;
+
+    if (pthread_create(&thread1, NULL, work, NULL) != 0)
+        return 1;
+
+    if (pthread_create(&thread2, NULL, work, NULL) != 0)
+        return 2;
+
+    if (pthread_join(thread1, NULL) != 0)
+        return 3;
+
+    if (pthread_join(thread2, NULL) != 0)
+        return 4;
+
+    return 0;
+}
+
+void *work()
+{
+
+	printf("== Informatica I ==\n");
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/10_pasar_parametros/010_thread.c
+Content:
+/*
+ * pass argument to thread
+ *
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <pthread.h>
+
+void *work(void *arg);
+
+int main(int argc, char **argv)
+{
+
+    pthread_t thread1;
+    long valor1 = 1;
+
+    // (1) agrego un nuevo thread
+    pthread_t thread2;
+    long valor2 = 20;
+
+    pthread_create(&thread1, NULL, work, (void *)&valor1);
+
+    // (1) agrego un nuevo thread
+    pthread_create(&thread2, NULL, work, (void *)&valor2);
+
+    pthread_join(thread1, NULL);
+
+    // (1) agrego un nuevo thread
+    pthread_join(thread2, NULL);
+
+    return 0;
+}
+
+void *work(void *arg)
+{
+
+    // casting...
+    long *valor = (long *)(arg);
+
+    printf("valor %ld\n", *valor);
+
+    return NULL;
+}
+
+================================================================================
+Path: ./linux-thread-in-C/12_retornar_valor/012_thread.c
+Content:
+/*
+ * Get return value from a thread (pthread_join)
+ *
+ *
+ */
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <time.h>
+#include <pthread.h>
+
+void *work(void *arg);
+
+int main(int argc, char **argv)
+{
+    pthread_t thread1;
+    long valor1 = 1;
+
+    // puntero para obtener la respuesta del thread en el join
+    int *res;
+
+    srand(time(NULL));
+
+    pthread_create(&thread1, NULL, work, (void *)&valor1);
+    pthread_join(thread1, (void **)&res);
+
+    printf("res: %d\n", *res);
+
+    // imprimimos la direccion
+    printf("main: %p\n", res);
+
+    free(res);
+
+    return 0;
+}
+
+void *work(void *arg)
+{
+    int valor = rand() % 10 + 1;
+
+    // warning: function returns address of local variable [-Wreturn-local-addr]
+    // Segmentation fault
+    // return (void *)&valor;
+
+    // solucion: crear variable dinamicamente
+    int *r = malloc(sizeof(int));
+    *r = valor;
+
+    // imprimimos la direccion
+    printf("work: %p\n", r);
+
+    return (void *)r;
+}
+
+================================================================================
